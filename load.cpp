@@ -8,7 +8,7 @@ int main () {
         printf("Load Average: %f    Avaliable Load: %d\n", load.average, load.available);
 #ifdef _WIN32
         Sleep(1000);
-#elif
+#else
         sleep(1);
 #endif
     }
