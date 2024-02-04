@@ -1,7 +1,7 @@
 #include "load.h"
 
 int main () {
-    LoadAverage load(10);
+    LoadAverage load;
 
     while (true) {
         load.update(5.0);
