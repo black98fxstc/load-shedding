@@ -2,7 +2,15 @@
 #include <cstdio>
 
 #include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <sysinfoapi.h>
+#include <processthreadsapi.h>
+#include <timezoneapi.h>
+#include <synchapi.h>
+#else
 #include <unistd.h>
+#endif
 
 class LoadAverage {
     double time_constant;
@@ -16,6 +24,16 @@ class LoadAverage {
     int user_hz;
 
     void get_stats () {
+#ifdef _WIN32
+        SYSTEMTIME sys_time;
+        FILETIME file_time;
+        GetSystemTime(&sys_time);
+        SystemTimeToFileTime(&sys_time, &file_time);
+        current_time = (file_time.dwHighDateTime * pow(2.0, 32) + file_time.dwLowDateTime) * 1e-7;
+        GetSystemTimes(NULL, NULL, &file_time);
+        current_cpu = (file_time.dwHighDateTime * pow(2.0, 32) + file_time.dwLowDateTime) * 1e-7;
+#elif defined(__APPLE__)
+#else
         timespec t;
         clock_gettime(CLOCK_REALTIME, &t);
         current_time = (double) t.tv_sec + (double) t.tv_nsec * 1e-9;
@@ -27,6 +45,7 @@ class LoadAverage {
         fscanf(f, "cpu  %lu", &jiffies);
         fclose(f);
         current_cpu = (double) jiffies / (double) user_hz;
+#endif
     }
 
 public:
@@ -38,7 +57,9 @@ public:
         squared = 1;
         average = 0;
         available = 0;
+#ifndef _WIN32
         user_hz = sysconf(_SC_CLK_TCK);
+#endif
         get_stats();
         last_cpu = current_cpu;
         last_time = current_time;
