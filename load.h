@@ -81,7 +81,7 @@ class LoadAverage {
         FILE *f;
         f = fopen("/proc/stat","r");
         unsigned long user, nice, system, idle;
-        fscanf(f, "cpu  %lu%lu%lu%lu", &user, &nice, &system, &idle);
+        fscanf(f, "cpu  %lu %lu %lu %lu", &user, &nice, &system, &idle);
         fclose(f);
         latest.busy = (double) (user + nice + system);
         latest.ticks = (double) (user + nice + system + idle);
@@ -105,8 +105,7 @@ public:
         previous = latest;
     }
 
-    void update(double load_threshold)
-    {
+    void update(double load_threshold) {
         if (!get_stats())
             return;
         current = (latest.busy - previous.busy) / (latest.ticks - previous.ticks);
