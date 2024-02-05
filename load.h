@@ -35,15 +35,15 @@ class LoadAverage {
 
         GetSystemTime(&sys_time);
         SystemTimeToFileTime(&sys_time, &file_time);
-        latest.time = (file_time.dwHighDateTime * pow(2.0, 32) + file_time.dwLowDateTime) * 1e-7;
+        latest.time = (file_time.dwHighDateTime * pow(2.0, 32) + file_time.dwLowDateTime);
 
         if (!GetSystemTimes(&idle, &system, &user))
             return false;
         latest.busy = ((user.dwHighDateTime * pow(2.0, 32) + user.dwLowDateTime) 
-            + (system.dwHighDateTime * pow(2.0, 32) + system.dwLowDateTime)) * 1e-7;
+            + (system.dwHighDateTime * pow(2.0, 32) + system.dwLowDateTime));
         latest.ticks = ((user.dwHighDateTime * pow(2.0, 32) + user.dwLowDateTime) 
             + (system.dwHighDateTime * pow(2.0, 32) + system.dwLowDateTime) 
-            + (idle.dwHighDateTime * pow(2.0, 32) + idle.dwLowDateTime)) * 1e-7;
+            + (idle.dwHighDateTime * pow(2.0, 32) + idle.dwLowDateTime));
 #elif defined(__APPLE__)
         timespec t;
         clock_gettime(CLOCK_REALTIME, &t);
