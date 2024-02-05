@@ -35,7 +35,7 @@ class LoadAverage {
 
         GetSystemTime(&sys_time);
         SystemTimeToFileTime(&sys_time, &file_time);
-        latest.time = (file_time.dwHighDateTime * pow(2.0, 32) + file_time.dwLowDateTime);
+        latest.time = (file_time.dwHighDateTime * pow(2.0, 32) + file_time.dwLowDateTime) * 1e-7;
 
         if (!GetSystemTimes(&idle, &system, &user))
             return false;
