@@ -15,6 +15,9 @@
 
 #ifdef __APPLE__
 #include <mach/mach.h>
+#elif defined(__BSD__)
+#include <sys/param.h>
+#include <sys/sysctl.h>
 #endif
 
 class LOAD_AVERAGE {
@@ -26,7 +29,7 @@ class LOAD_AVERAGE {
     int n_cpus;
 
     struct {
-        double busy, ticks, time;
+        double busy, ticks, time, temp;
     } latest, previous;
 
     bool get_stats () {
@@ -38,7 +41,12 @@ class LOAD_AVERAGE {
         GetSystemTime(&sys_time);
         SystemTimeToFileTime(&sys_time, &file_time);
         latest.time = (file_time.dwHighDateTime * pow(2.0, 32) + file_time.dwLowDateTime) * 1e-7;
-
+#else
+        timespec t;
+        clock_gettime(CLOCK_REALTIME, &t);
+        latest.time = (double) t.tv_sec + (double) t.tv_nsec * 1e-9;
+#endif
+#ifdef _WIN32
         if (!GetSystemTimes(&idle, &system, &user))
             return false;
         latest.busy = ((user.dwHighDateTime * pow(2.0, 32) + user.dwLowDateTime) 
@@ -47,10 +55,6 @@ class LOAD_AVERAGE {
             + (system.dwHighDateTime * pow(2.0, 32) + system.dwLowDateTime) 
             + (idle.dwHighDateTime * pow(2.0, 32) + idle.dwLowDateTime));
 #elif defined(__APPLE__)
-        timespec t;
-        clock_gettime(CLOCK_REALTIME, &t);
-        latest.time = (double) t.tv_sec + (double) t.tv_nsec * 1e-9;
-
         // https://ladydebug.com/blog/codes/cpuusage_mac.htm
         mach_msg_type_number_t  unCpuMsgCount = 0;
         processor_flavor_t nCpuFlavor = PROCESSOR_CPU_LOAD_INFO;;
@@ -66,67 +70,99 @@ class LOAD_AVERAGE {
         latest.ticks = 0;
         nErr = host_processor_info( host,nCpuFlavor,&unCPUNum,
                             (processor_info_array_t *)&structCpuData,&unCpuMsgCount );
+        if(nErr != KERN_SUCCESS)
+            return false;
         for(int i = 0; i<(int)unCPUNum; i++)
         {
-                ulSystem += structCpuData[i].cpu_ticks[CPU_STATE_SYSTEM];
-                ulUser += structCpuData[i].cpu_ticks[CPU_STATE_USER];
-                ulNice += structCpuData[i].cpu_ticks[CPU_STATE_NICE];
-                ulIdle += structCpuData[i].cpu_ticks[CPU_STATE_IDLE];
-                latest.busy += ulSystem + ulUser + ulNice;
-                latest.ticks += ulSystem + ulUser + ulNice + ulIdle;
+            ulSystem += structCpuData[i].cpu_ticks[CPU_STATE_SYSTEM];
+            ulUser += structCpuData[i].cpu_ticks[CPU_STATE_USER];
+            ulNice += structCpuData[i].cpu_ticks[CPU_STATE_NICE];
+            ulIdle += structCpuData[i].cpu_ticks[CPU_STATE_IDLE];
+            latest.busy  += ulSystem + ulUser + ulNice;
+            latest.ticks += ulSystem + ulUser + ulNice + ulIdle;
         }
-#else
-        timespec t;
-        clock_gettime(CLOCK_REALTIME, &t);
-        latest.time = (double) t.tv_sec + (double) t.tv_nsec * 1e-9;
+#elif defined(__BSD__)
+        int mib[2];
+        uint64_t time[5];
+        size_t len = sizeof(time);
 
+        mib[0] = CTL_KERN;
+        MIb[1] = kern.cp_time;
+        int err = sysctl(mib, 2, time, &len, NULL, 0);
+        if (err)
+            return false;
+                    //  user      nice      system    interrupt idle
+        current.busy  = time[0] + time[1] + time[2] + time[3];
+        current.ticks = time[0] + time[1] + time[2] + time[3] + time[4];
+#else
         FILE *f;
         f = fopen("/proc/stat","r");
+        if (!f)
+            return false;
         unsigned long user, nice, system, idle;
         fscanf(f, "cpu  %lu %lu %lu %lu", &user, &nice, &system, &idle);
         fclose(f);
-        latest.busy = (double) (user + nice + system);
+        latest.busy  = (double) (user + nice + system);
         latest.ticks = (double) (user + nice + system + idle);
+#endif
+#if !defined(_WIN32) && !defined(__APPLE__)
+        f = NULL;
+        f = fopen( "/sys/class/thermal/thermal_zone0/temp", "r");
+        int temp;
+        if (f != NULL) {
+            fscanf(f, "%d", &temp);
+            fclose(f);
+            temperature = (double) temp / 1e3;
+        };
 #endif
         return (latest.ticks > previous.ticks && latest.busy > previous.busy && latest.time > previous.time);
     }
 
 public:
     double average;
+    double temperature;
+    double too_hot;
+    double cool_enough;
     int available;
 
     LOAD_AVERAGE (double time = 3.0) : time_constant(time) {
-        current = 0;
-        squared = 1;
-        average = 0;
-        available = 0;
 #ifndef _WIN32
         user_hz = sysconf(_SC_CLK_TCK);
 #endif
         n_cpus = std::thread::hardware_concurrency();
+        current = average = available = n_cpus;   // available starts high in case load_shedding is enabled
+                                                  // but the cpu ticks aren't available. The otheres so that
+        squared = current + current * current;    // it starts up gradually and so error doesn't start near zero
         get_stats();
         previous = latest;
+        temperature = 55;
+        too_hot = 95;
+        cool_enough = 80;
     }
 
     bool update(double load_threshold) {
         if (!get_stats())
             return false;
         current = n_cpus * (latest.busy - previous.busy) / (latest.ticks - previous.ticks);
+        if (available > load_threshold)
+            available = load_threshold;
 
         // exponential smoothing
         double x = exp(- (latest.time - previous.time) / time_constant);
         average = x * average + (1 - x) * current;
         squared = x * squared + (1 - x) * current * current;
-        double error = sqrt(squared - average * average);
+        double error = sqrt(squared - average * average); // one standard deviation error of estimate
+        previous = latest;
 
-        // don't make more than one adjustpemt per time.constant
+        // don't make more than one adjustpemt per time_constant
         if (latest.time > next_time) {
-            if (average > load_threshold + error && available > 0) {
+            // better than 2:1 odds it's really over, so take the bet reducing load
+            if ((average > load_threshold + error || temperature > too_hot) && available > 0) {
                 --available;
                 next_time = latest.time + time_constant;
                 return true;
-            }
-            else if (average < load_threshold - 2 * error && available < load_threshold) {
+            } // require more like 50:1 to increase load, unless it's likely approaching zero
+            else if (average < load_threshold - 2 * error && temperature < cool_enough && available < load_threshold) {
                 ++available;
                 next_time = latest.time + time_constant;
                 return true;

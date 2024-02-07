@@ -5,7 +5,7 @@ int main () {
 
     while (true) {
         load.update(5.0);
-        printf("Load Average: %f    Avaliable Load: %d\n", load.average, load.available);
+        printf("Load Average: %f   Avaliable Load: %d   Temperature: %f\n", load.average, load.available, load.temperature);
 #ifdef _WIN32
         Sleep(1000);
 #else
